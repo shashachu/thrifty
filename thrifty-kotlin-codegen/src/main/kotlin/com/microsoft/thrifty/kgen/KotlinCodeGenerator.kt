@@ -126,6 +126,7 @@ class KotlinCodeGenerator(
     private var omitServiceClients: Boolean = false
     private var coroutineServiceClients: Boolean = false
     private var emitJvmName: Boolean = false
+    private var emitBigEnums: Boolean = false
     private var failOnUnknownEnumValues: Boolean = true
 
     private var listClassName: ClassName? = null
@@ -237,6 +238,10 @@ class KotlinCodeGenerator(
 
     fun emitJvmName(): KotlinCodeGenerator = apply {
         this.emitJvmName = true
+    }
+
+    fun emitBigEnums(): KotlinCodeGenerator = apply {
+        this.emitBigEnums = true
     }
 
     fun failOnUnknownEnumValues(value: Boolean = true): KotlinCodeGenerator = apply {
@@ -360,13 +365,15 @@ class KotlinCodeGenerator(
     internal fun generateEnumClass(enumType: EnumType): TypeSpec {
         val typeBuilder = TypeSpec.enumBuilder(enumType.name)
                 .addGeneratedAnnotation()
-                .addProperty(PropertySpec.builder("value", INT)
-                        .jvmField()
-                        .initializer("value")
-                        .build())
-                .primaryConstructor(FunSpec.constructorBuilder()
-                        .addParameter("value", INT)
-                        .build())
+        if (!emitBigEnums) {
+            typeBuilder.addProperty(PropertySpec.builder("value", INT)
+                    .jvmField()
+                    .initializer("value")
+                    .build())
+            typeBuilder.primaryConstructor(FunSpec.constructorBuilder()
+                .addParameter("value", INT)
+                .build())
+        }
 
         if (enumType.isDeprecated) typeBuilder.addAnnotation(makeDeprecated())
         if (enumType.hasJavadoc) typeBuilder.addKdoc("%L", enumType.documentation)
@@ -384,8 +391,11 @@ class KotlinCodeGenerator(
 
         val nameAllocator = nameAllocators[enumType]
         for (member in enumType.members) {
-            val enumMemberSpec= TypeSpec.anonymousClassBuilder()
-                    .addSuperclassConstructorParameter("%L", member.value)
+            val enumMemberSpec= TypeSpec.anonymousClassBuilder().apply {
+                if (!emitBigEnums) {
+                    addSuperclassConstructorParameter("%L", member.value)
+                }
+            }
 
             if (member.isDeprecated) enumMemberSpec.addAnnotation(makeDeprecated())
             if (member.hasJavadoc) enumMemberSpec.addKdoc("%L", member.documentation)
@@ -395,13 +405,36 @@ class KotlinCodeGenerator(
             findByValue.addStatement("%L -> %L", member.value, name)
         }
 
-
         val companion = TypeSpec.companionObjectBuilder()
                 .addFunction(findByValue
                         .addStatement("else -> null")
                         .endControlFlow()
                         .build())
                 .build()
+
+        if (emitBigEnums) {
+            // Generate the function to map an enum to an int value
+            val valueFn = FunSpec.builder("value")
+                .returns(Int::class).apply {
+                    beginControlFlow("return when (this)")
+                    for (member in enumType.members) {
+                        val name = nameAllocator[member]
+                        addStatement("%L -> %L", name, member.value)
+                    }
+                    endControlFlow()
+                }
+                .build()
+            // For convenience, also generate a property which calls through to the function
+            // so that Kotlin call-sites don't need to change when transitioning to big enums.
+            val valueProperty = PropertySpec.builder("value", Int::class)
+                .getter(FunSpec.getterBuilder()
+                    .addStatement("return value()")
+                    .build()
+                )
+                .build()
+            typeBuilder.addFunction(valueFn)
+            typeBuilder.addProperty(valueProperty)
+        }
 
         return typeBuilder
                 .addType(companion)

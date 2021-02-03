@@ -57,6 +57,7 @@ import java.util.ArrayList
  * [--map-type=java.util.HashMap]
  * [--lang=[java|kotlin]]
  * [--kt-file-per-type]
+ * [--kt-big-enum]
  * [--parcelable]
  * [--use-android-annotations]
  * [--nullability-annotation-type=[none|android-support|androidx]]
@@ -86,7 +87,6 @@ import java.util.ArrayList
  * class name when instantiating map-typed values.  Defaults to [java.util.HashMap].
  * Android users will likely wish to substitute `android.support.v4.util.ArrayMap`.
  *
- * `--lang=[java|kotlin]` is optional, defaulting to Java.  When provided, the
  * compiler will generate code in the specified language.
  *
  * `--kt-file-per-type` is optional.  When specified, one Kotlin file will be generated
@@ -258,6 +258,9 @@ class ThriftyCompiler {
         val kotlinBuilderlessDataClasses: Boolean by option("--experimental-kt-builderless-structs")
                 .flag(default = false)
 
+        val kotlinBigEnums: Boolean by option("--kt-big-enums")
+                .flag("--kt-no-big-enums", default = false)
+
         val kotlinCoroutineClients: Boolean by option("--kt-coroutine-clients")
                 .flag(default = false)
 
@@ -310,6 +313,7 @@ class ThriftyCompiler {
                 kotlinBuilderlessDataClasses -> Language.KOTLIN
                 kotlinBuilderRequiredConstructor -> Language.KOTLIN
                 kotlinFilePerType -> Language.KOTLIN
+                kotlinBigEnums -> Language.KOTLIN
                 nullabilityAnnotationType != NullabilityAnnotationType.NONE -> Language.JAVA
                 else -> null
             }
@@ -370,6 +374,10 @@ class ThriftyCompiler {
 
             if (kotlinEmitJvmName) {
                 gen.emitJvmName()
+            }
+
+            if (kotlinBigEnums) {
+                gen.emitBigEnums()
             }
 
             if (kotlinFilePerType) {
