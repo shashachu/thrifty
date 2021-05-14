@@ -57,7 +57,7 @@ import java.util.ArrayList
  * [--map-type=java.util.HashMap]
  * [--lang=[java|kotlin]]
  * [--kt-file-per-type]
- * [--kt-big-enum]
+ * [--kt-huge-enum]
  * [--parcelable]
  * [--use-android-annotations]
  * [--nullability-annotation-type=[none|android-support|androidx]]
@@ -258,8 +258,8 @@ class ThriftyCompiler {
         val kotlinBuilderlessDataClasses: Boolean by option("--experimental-kt-builderless-structs")
                 .flag(default = false)
 
-        val kotlinBigEnums: Boolean by option("--kt-big-enums")
-                .flag("--kt-no-big-enums", default = false)
+        val kotlinHugeEnums: Boolean by option("--kt-huge-enums")
+                .flag("--kt-no-huge-enums", default = false)
 
         val kotlinCoroutineClients: Boolean by option("--kt-coroutine-clients")
                 .flag(default = false)
@@ -313,7 +313,7 @@ class ThriftyCompiler {
                 kotlinBuilderlessDataClasses -> Language.KOTLIN
                 kotlinBuilderRequiredConstructor -> Language.KOTLIN
                 kotlinFilePerType -> Language.KOTLIN
-                kotlinBigEnums -> Language.KOTLIN
+                kotlinHugeEnums -> Language.KOTLIN
                 nullabilityAnnotationType != NullabilityAnnotationType.NONE -> Language.JAVA
                 else -> null
             }
@@ -376,8 +376,8 @@ class ThriftyCompiler {
                 gen.emitJvmName()
             }
 
-            if (kotlinBigEnums) {
-                gen.emitBigEnums()
+            if (kotlinHugeEnums) {
+                gen.enumHugeEnums()
             }
 
             if (kotlinFilePerType) {

@@ -88,6 +88,8 @@ import com.squareup.kotlinpoet.jvm.jvmField
 import com.squareup.kotlinpoet.jvm.jvmStatic
 import okio.ByteString
 import java.io.IOException
+import kotlin.math.ceil
+import kotlin.math.min
 
 private object Tags {
     val ADAPTER = "RESERVED:ADAPTER"
@@ -126,7 +128,7 @@ class KotlinCodeGenerator(
     private var omitServiceClients: Boolean = false
     private var coroutineServiceClients: Boolean = false
     private var emitJvmName: Boolean = false
-    private var emitBigEnums: Boolean = false
+    private var emitHugeEnums: Boolean = false
     private var failOnUnknownEnumValues: Boolean = true
 
     private var listClassName: ClassName? = null
@@ -240,8 +242,8 @@ class KotlinCodeGenerator(
         this.emitJvmName = true
     }
 
-    fun emitBigEnums(): KotlinCodeGenerator = apply {
-        this.emitBigEnums = true
+    fun enumHugeEnums(): KotlinCodeGenerator = apply {
+        this.emitHugeEnums = true
     }
 
     fun failOnUnknownEnumValues(value: Boolean = true): KotlinCodeGenerator = apply {
@@ -260,7 +262,13 @@ class KotlinCodeGenerator(
         val typedefsByNamespace = LinkedHashMultimap.create<String, TypeAliasSpec>()
 
         schema.typedefs.forEach { typedefsByNamespace.put(it.kotlinNamespace, generateTypeAlias(it)) }
-        schema.enums.forEach { specsByNamespace.put(it.kotlinNamespace, generateEnumClass(it)) }
+        if (emitHugeEnums) {
+            schema.enums.forEach {
+                specsByNamespace.putAll(it.kotlinNamespace, generateHugeEnumClasses(it))
+            }
+        } else {
+            schema.enums.forEach { specsByNamespace.put(it.kotlinNamespace, generateEnumClass(it)) }
+        }
         schema.structs.forEach { specsByNamespace.put(it.kotlinNamespace, generateDataClass(schema, it)) }
         schema.unions.forEach {
             // NOTE: We can't adequately represent empty unions with sealed classes, because one can't
@@ -365,7 +373,7 @@ class KotlinCodeGenerator(
     internal fun generateEnumClass(enumType: EnumType): TypeSpec {
         val typeBuilder = TypeSpec.enumBuilder(enumType.name)
                 .addGeneratedAnnotation()
-        if (!emitBigEnums) {
+        if (!emitHugeEnums) {
             typeBuilder.addProperty(PropertySpec.builder("value", INT)
                     .jvmField()
                     .initializer("value")
@@ -392,7 +400,7 @@ class KotlinCodeGenerator(
         val nameAllocator = nameAllocators[enumType]
         for (member in enumType.members) {
             val enumMemberSpec= TypeSpec.anonymousClassBuilder().apply {
-                if (!emitBigEnums) {
+                if (!emitHugeEnums) {
                     addSuperclassConstructorParameter("%L", member.value)
                 }
             }
@@ -412,7 +420,7 @@ class KotlinCodeGenerator(
                         .build())
                 .build()
 
-        if (emitBigEnums) {
+        if (emitHugeEnums) {
             // Generate the function to map an enum to an int value
             val valueFn = FunSpec.builder("value")
                 .returns(Int::class).apply {
@@ -439,6 +447,99 @@ class KotlinCodeGenerator(
         return typeBuilder
                 .addType(companion)
                 .build()
+    }
+
+    internal fun generateHugeEnumClasses(enumType: EnumType): List<TypeSpec> {
+        val typeSpecs = mutableListOf<TypeSpec>()
+        val enumBuilder = TypeSpec.classBuilder(enumType.name)
+            .addGeneratedAnnotation()
+
+        val constructor = FunSpec.constructorBuilder()
+            .addParameter("name", String::class)
+            .addParameter("value", Int::class)
+            .build()
+        enumBuilder.primaryConstructor(constructor)
+            .addProperty(PropertySpec.builder("name", String::class)
+                .initializer("name")
+                .build())
+            .addProperty(PropertySpec.builder("value", Int::class)
+                .initializer("value")
+                .build())
+
+        val splitClasses = generateHugeEnumSplitValueClasses(enumType)
+
+        val companion = TypeSpec.companionObjectBuilder()
+            .superclass(ClassName(enumType.kotlinNamespace, splitClasses.last().name.orEmpty()))
+            .build()
+        enumBuilder.addType(companion)
+
+        val toString = FunSpec.builder("toString")
+            .returns(String::class)
+            .addModifiers(KModifier.OVERRIDE)
+            .addStatement("return name")
+        enumBuilder.addFunction(toString.build())
+
+        typeSpecs.add(enumBuilder.build())
+        typeSpecs.addAll(splitClasses)
+
+        return typeSpecs
+    }
+
+    private val NUM_VALUES_PER_CLASS = 10
+
+    private fun generateHugeEnumSplitValueClasses(
+        enumType: EnumType,
+    ): List<TypeSpec> {
+        val typeSpecs = mutableListOf<TypeSpec>()
+        val numValues = enumType.members.size
+        val numClasses = ceil(numValues / NUM_VALUES_PER_CLASS.toDouble()).toInt()
+        val classNames = mutableListOf<ClassName>()
+        (0 until numClasses).forEach { numClass ->
+            val generatedName = "DO_NOT_USE_ME_Parent_${enumType.name}_$numClass"
+            val className = ClassName(enumType.kotlinNamespace, generatedName)
+            val splitClassBuilder = TypeSpec.classBuilder(className)
+                .addGeneratedAnnotation()
+                .addModifiers(KModifier.OPEN)
+                .primaryConstructor(FunSpec.constructorBuilder()
+                    .addModifiers(KModifier.PROTECTED)
+                    .build())
+            if (numClass > 0) {
+                splitClassBuilder.superclass(classNames[numClass - 1])
+            }
+            classNames.add(className)
+            val startIdx = numClass * NUM_VALUES_PER_CLASS
+            val endIdx = min((numClass + 1) * NUM_VALUES_PER_CLASS, numValues)
+            (startIdx until endIdx).forEach { curIdx ->
+                val member = enumType.members[curIdx]
+                splitClassBuilder.addProperty(
+                    PropertySpec.builder(member.name, enumType.typeName)
+                        .initializer("%T(%S, %L)", enumType.typeName, member.name, member.value)
+                        .build()
+                )
+            }
+            val findByValue = FunSpec.builder("findByValue")
+                .addParameter("value", Int::class)
+                .returns(enumType.typeName.copy(nullable = true))
+                .beginControlFlow("return when (value)")
+                .addModifiers(if (numClass == 0) {
+                    KModifier.OPEN
+                } else {
+                    KModifier.OVERRIDE
+                })
+            (startIdx until endIdx).forEach { curIdx ->
+                val member = enumType.members[curIdx]
+                findByValue.addStatement("%L -> %L", member.value, member.name)
+            }
+            if (numClass == 0) {
+                findByValue.addStatement("else -> null")
+            } else {
+                findByValue.addStatement("else -> super.findByValue(value)")
+            }
+            findByValue.endControlFlow()
+            splitClassBuilder.addFunction(findByValue.build())
+            typeSpecs.add(splitClassBuilder.build())
+        }
+        return typeSpecs
     }
 
     // endregion Enums
