@@ -32,6 +32,7 @@ import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.options.transformAll
 import com.github.ajalt.clikt.parameters.options.validate
 import com.github.ajalt.clikt.parameters.types.choice
+import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.path
 import com.microsoft.thrifty.gen.NullabilityAnnotationType
 import com.microsoft.thrifty.gen.ThriftyCodeGenerator
@@ -57,7 +58,7 @@ import java.util.ArrayList
  * [--map-type=java.util.HashMap]
  * [--lang=[java|kotlin]]
  * [--kt-file-per-type]
- * [--kt-huge-enum]
+ * [--kt-huge-enums=Int]
  * [--parcelable]
  * [--use-android-annotations]
  * [--nullability-annotation-type=[none|android-support|androidx]]
@@ -258,8 +259,9 @@ class ThriftyCompiler {
         val kotlinBuilderlessDataClasses: Boolean by option("--experimental-kt-builderless-structs")
                 .flag(default = false)
 
-        val kotlinHugeEnums: Boolean by option("--kt-huge-enums")
-                .flag("--kt-no-huge-enums", default = false)
+        val kotlinHugeEnums: Int by option("--kt-huge-enums")
+                .int()
+                .default(-1)
 
         val kotlinCoroutineClients: Boolean by option("--kt-coroutine-clients")
                 .flag(default = false)
@@ -313,7 +315,7 @@ class ThriftyCompiler {
                 kotlinBuilderlessDataClasses -> Language.KOTLIN
                 kotlinBuilderRequiredConstructor -> Language.KOTLIN
                 kotlinFilePerType -> Language.KOTLIN
-                kotlinHugeEnums -> Language.KOTLIN
+                kotlinHugeEnums != -1 -> Language.KOTLIN
                 nullabilityAnnotationType != NullabilityAnnotationType.NONE -> Language.JAVA
                 else -> null
             }
@@ -376,8 +378,8 @@ class ThriftyCompiler {
                 gen.emitJvmName()
             }
 
-            if (kotlinHugeEnums) {
-                gen.enumHugeEnums()
+            if (kotlinHugeEnums > 0) {
+                gen.numValuesPerHugeEnum(kotlinHugeEnums)
             }
 
             if (kotlinFilePerType) {
