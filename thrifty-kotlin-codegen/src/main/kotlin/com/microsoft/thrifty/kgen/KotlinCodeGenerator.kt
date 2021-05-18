@@ -428,8 +428,8 @@ class KotlinCodeGenerator(
 
     /**
      * For very very large enums, we will run into Java compiler code size limitations. To get around this,
-     * we break up enums into a hierarchy of classes that will serve as superclasses of the companion object
-     * of the final class. The number of values per class is set via the `--kt-huge-enums` option
+     * we break up enums into a hierarchy of classes that will serve as superclasses of the final enum-like class.
+     * The number of values per class is set via the `--kt-huge-enums` option
      *
      * For the following example thrift enum and `--kt-huge-enums=2`:
      *
@@ -444,32 +444,62 @@ class KotlinCodeGenerator(
      *
      * We would generate:
      *
-     * open class DO_NOT_USE_ME_Parent_Color_0 protected constructor() {
-     *   @JvmField
-     *   val RED = Color("RED", 1)
-     *   @JvmField
-     *   val ORANGE = Color("ORANGE", 2)
-     * }
+     * @Generated(
+     *      value = ["com.microsoft.thrifty.kgen.KotlinCodeGenerator"],
+     *      comments = "https://github.com/microsoft/thrifty"
+     *  )
+     *  open class DO_NOT_USE_ME_Parent_Color_0 protected constructor(
+     *      val name: String,
+     *      val value: Int
+     *  ) {
+     *      override fun toString(): String = name
+     *      companion object {
+     *          val `$__GENERATED_RED`: Color = Color("RED", 1)
+     *          val `$__GENERATED_ORANGE`: Color = Color("ORANGE", 2)
+     *          fun findByValue(value: Int): Color? = when (value) {
+     *              1 -> `$__GENERATED_RED`
+     *              2 -> `$__GENERATED_ORANGE`
+     *              else -> null
+     *          }
+     *      }
+     *  }
      *
-     * open class DO_NOT_USE_ME_Parent_Color_1 protected constructor() : DO_NOT_USE_ME_Parent_Color_0() {
-     *   @JvmField
-     *   val YELLOW = Color("YELLOW", 3)
-     *   @JvmField
-     *   val GREEN = Color("GREEN", 4)
-     * }
-     *
-     * open class DO_NOT_USE_ME_Parent_Color_2 protected constructor() : DO_NOT_USE_ME_Parent_Color_1() {
-     *   @JvmField
-     *   val BLUE = Color("BLUE", 5)
-     *   @JvmField
-     *   val PURPLE = Color("PURPLE", 6)
-     * }
-     *
-     * class Color(val name: String, val value: Int) {
-     *   companion object : DO_NOT_USE_ME_Parent_Color_2()
-     *   override fun toString(): String = name
-     * }
-     *
+     *  @Generated(
+     *      value = ["com.microsoft.thrifty.kgen.KotlinCodeGenerator"],
+     *      comments = "https://github.com/microsoft/thrifty"
+     *  )
+     *  open class DO_NOT_USE_ME_Parent_Color_1 protected constructor(
+     *      name: String,
+     *      value: Int
+     *  ) : DO_NOT_USE_ME_Parent_Color_0(name, value) {
+     *      companion object {
+     *          val `$__GENERATED_YELLOW`: Color = Color("YELLOW", 3)
+     *          val `$__GENERATED_GREEN`: Color = Color("GREEN", 4)
+     *          fun findByValue(value: Int): Color? = when (value) {
+     *              3 -> `$__GENERATED_YELLOW`
+     *              4 -> `$__GENERATED_GREEN`
+     *              else -> DO_NOT_USE_ME_Parent_Color_0.findByValue(value)
+     *          }
+     *      }
+     *  }
+     *  @Generated(
+     *      value = ["com.microsoft.thrifty.kgen.KotlinCodeGenerator"],
+     *      comments = "https://github.com/microsoft/thrifty"
+     *  )
+     *  open class DO_NOT_USE_ME_Parent_Color_2 protected constructor(
+     *      name: String,
+     *      value: Int
+     *  ) : DO_NOT_USE_ME_Parent_Color_1(name, value) {
+     *      companion object {
+     *          val `$__GENERATED_BLUE`: Color = Color("BLUE", 5)
+     *          val `$__GENERATED_PURPLE`: Color = Color("PURPLE", 6)
+     *          fun findByValue(value: Int): Color? = when (value) {
+     *              5 -> `$__GENERATED_BLUE`
+     *              6 -> `$__GENERATED_PURPLE`
+     *              else -> DO_NOT_USE_ME_Parent_Color_1.findByValue(value)
+     *          }
+     *      }
+     *  }
      */
     internal fun generateHugeEnumClasses(enumType: EnumType): FileSpec.Builder {
         val typeSpecs = mutableListOf<TypeSpec>()
